@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flipbook Viewer</title>
+
+  <!-- Turn.js (flipbook) - CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4.1.0/turn.min.js"></script>
+
+  <!-- PDF.js (mozilla) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+  <style>
+    :root {
+      --book-width: 900px;
+      --book-height: 600px;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      display:flex;
+      min-height:100vh;
+      align-items:center;
+      justify-content:center;
+      background: #f4f6f8;
+    }
+
+    .viewer-wrapper {
+      width: 100%;
+      max-width: calc(var(--book-width) + 40px);
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    #flipbook {
+      width: 100%;
+      height: var(--book-height);
+      margin: 0 auto;
+      /* turn.js requires width/height on the container */
+    }
+
+    .page {
+      width: calc(50% - 10px); /* turn.js treats two pages as one sheet by default */
+      height: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      background: white;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      :root {
+        --book-height: 480px;
+      }
+      .page { padding:6px; }
+    }
+
+    .loading {
+      text-align:center;
+      padding: 12px 0;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="viewer-wrapper">
+    <div class="loading" id="loading">Loading PDF…</div>
+    <div id="flipbook"></div>
+  </div>
+
+  <script>
+  // Configuration
+  const PDF_URL = 'book.pdf'; // put your PDF in repo root or give a same-origin URL
+
+  // PDF.js worker setup (use the same version as the included script)
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+  let pdfDoc = null;
+  const flipbook = document.getElementById('flipbook');
+  const loadingEl = document.getElementById('loading');
+
+  async function init() {
+    try {
+      pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
+      loadingEl.textContent = `Loaded ${pdfDoc.numPages} pages — building flipbook...`;
+
+      // Build placeholders: each PDF page becomes a .page element with a canvas
+      // turn.js organizes pages as singles; this will treat each PDF page as one page.
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'page';
+        pageDiv.dataset.pageNumber = p;
+
+        const canvas = document.createElement('canvas');
+        canvas.dataset.rendered = 'false';
+        pageDiv.appendChild(canvas);
+
+        flipbook.appendChild(pageDiv);
+      }
+
+      // Initialize turn.js
+      // width and height are set by CSS; turn will size accordingly
+      $('#flipbook').turn({
+        width: Math.min(window.innerWidth - 40, 900),
+        height: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--book-height')),
+        autoCenter: true
+      });
+
+      loadingEl.style.display = 'none';
+
+      // Lazy render currently visible pages + 1 on each side
+      renderVisiblePages();
+      // Hook to turn event to render next pages on flip
+      $('#flipbook').bind('turned', function(e, page, view) {
+        renderVisiblePages();
+      });
+
+      // Also render on resize (throttle)
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(renderVisiblePages, 200);
+      });
+
+    } catch (err) {
+      loadingEl.textContent = 'Failed to load PDF: ' + err.message;
+    }
+  }
+
+  // Determine visible pages and render them
+  function renderVisiblePages() {
+    const visiblePages = getVisiblePageNumbers();
+    visiblePages.forEach(pn => renderPage(pn));
+  }
+
+  // Simple heuristic using turn.js API to find current view
+  function getVisiblePageNumbers() {
+    const turnObj = $('#flipbook').turn('size') ? $('#flipbook') : null;
+    const page = $('#flipbook').turn('page') || 1;
+    // turn shows two pages (left/right) on larger screens; we'll render page-1..page+1
+    const nums = new Set();
+    nums.add(page);
+    nums.add(page - 1);
+    nums.add(page + 1);
+    return Array.from(nums).filter(n => n >= 1 && n <= pdfDoc.numPages);
+  }
+
+  async function renderPage(pageNumber) {
+    const pageDiv = flipbook.querySelector(`.page[data-page-number="${pageNumber}"]`);
+    if (!pageDiv) return;
+    const canvas = pageDiv.querySelector('canvas');
+    if (canvas.dataset.rendered === 'true') return; // already rendered
+
+    try {
+      const page = await pdfDoc.getPage(pageNumber);
+      // viewport scale chosen to produce crisp canvas within layout
+      const containerWidth = pageDiv.clientWidth - 0; // padding accounted
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = (containerWidth * devicePixelRatio) / viewport.width;
+      const scaledViewport = page.getViewport({ scale });
+
+      canvas.width = Math.floor(scaledViewport.width);
+      canvas.height = Math.floor(scaledViewport.height);
+      // style size (CSS) for responsiveness
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+
+      const ctx = canvas.getContext('2d');
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: scaledViewport,
+      };
+
+      await page.render(renderContext).promise;
+      canvas.dataset.rendered = 'true';
+    } catch (err) {
+      console.error('Render error', err);
+    }
+  }
+
+  // jQuery is required by turn.js; add tiny loader if not present
+  (function ensureJQuery(cb) {
+    if (window.jQuery) return cb();
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js';
+    s.onload = cb;
+    document.head.appendChild(s);
+  })(init);
+
+  </script>
+</body>
+</html>
