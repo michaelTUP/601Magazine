@@ -1,309 +1,328 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Book Flip Reader — Drag Fold</title>
-  <style>
-    :root{ --book-width:900px; --book-height:600px; }
-    *{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f2f2f6}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Book Flip — Realistic Covering Flip</title>
+<style>
+  :root{ --book-width:900px; --book-height:600px; }
+  *{box-sizing:border-box; user-select:none;}
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; background:#eee; font-family:Arial, sans-serif; }
 
-    /* wrapper */
-    .wrap{width:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;padding:24px 12px}
+  /* BOOK LAYOUT -------------------------------------------------- */
+  .book{
+    width:var(--book-width);
+    height:var(--book-height);
+    display:flex;
+    position:relative;
+    box-shadow:0 18px 50px rgba(0,0,0,0.15);
+  }
 
-    /* book shell keeps fixed aspect so images won't shift layout */
-    .book-shell{width:100%;max-width:calc(var(--book-width));aspect-ratio:3/2;position:relative;perspective:2600px;display:flex;align-items:center;justify-content:center}
+  .left-page{
+    width:50%;
+    height:100%;
+    background:#fff;
+    overflow:hidden;
+    position:relative;
+    z-index:1;
+  }
 
-    /* main book */
-    .book{width:100%;height:100%;position:relative;transform-style:preserve-3d;display:flex;background:linear-gradient(180deg,#fff,#f7f7f9);border-radius:12px;box-shadow:0 12px 40px rgba(12,20,30,0.12);overflow:hidden;z-index:20}
+  .left-page img{ width:100%; height:100%; object-fit:cover; display:block; }
 
-    /* left/right pages */
-    .page-left,.page-right{width:50%;height:100%;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;user-select:none}
-    .page-left{border-right:1px solid rgba(0,0,0,.06);background:#fff}
-    .page-right{background:#fff}
+  /* left cover (growing overlay from right to left) */
+  #leftCover{
+    position:absolute;
+    top:0;
+    right:0;
+    height:100%;
+    width:0%;
+    background-position:right center;
+    background-size:cover;
+    pointer-events:none;
+    z-index:5;
+    box-shadow: inset -40px 0 60px rgba(0,0,0,0.35);
+  }
 
-    /* dim placeholder */
-    .page-left.is-blank img{opacity:.34;transform:scale(.98);filter:grayscale(.0)}
+  .right-stack{
+    width:50%;
+    height:100%;
+    position:relative;
+    perspective:2000px;
+    overflow:visible;
+  }
 
-    /* images */
-    .page-img{width:100%;height:100%;object-fit:contain;display:block;visibility:visible;min-width:120px;min-height:60px}
+  /* sheet that rotates */
+  .sheet{
+    width:100%;
+    height:100%;
+    position:absolute;
+    top:0;
+    left:0;
+    transform-style:preserve-3d;
+    transform-origin:left center;
+    z-index:50;
+    will-change:transform, box-shadow;
+  }
 
-    /* flipper - the turning page */
-    .flipper{position:absolute;top:0;left:50%;width:50%;height:100%;transform-origin:left center;pointer-events:none;z-index:70;will-change:transform,filter;transform-style:preserve-3d}
-    .flipper .face{position:absolute;inset:0;backface-visibility:hidden;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .flipper .face img{width:100%;height:100%;object-fit:contain}
-    .flipper.hidden{display:none}
+  .face{
+    width:100%;
+    height:100%;
+    position:absolute;
+    backface-visibility:hidden;
+    overflow:hidden;
+    background:#fff;
+  }
 
-    /* faces decoration */
-    .flipper .face::after{content:'';position:absolute;top:0;right:0;width:4px;height:100%;background:linear-gradient(90deg,rgba(255,255,255,.95),rgba(255,255,255,.25));transform:translateX(50%);pointer-events:none}
-    .flipper .back{transform:rotateY(180deg);background:linear-gradient(180deg,#f6f6f6,#efefef)}
+  .face img{ width:100%; height:100%; object-fit:cover; display:block; }
 
-    /* underlay - shows incoming page behind the flipper */
-    .underlay{position:absolute;top:0;left:50%;width:50%;height:100%;pointer-events:none;z-index:40;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s ease, transform .18s ease, filter .18s ease;overflow:hidden}
-    .underlay img{width:100%;height:100%;object-fit:contain;display:block}
-    .underlay.show{opacity:1;transform:translateZ(6px) scale(1.01);filter:blur(.2px)}
-    @media (max-width:720px){ .underlay{left:0;width:100%} }
+  .back{ transform:rotateY(180deg); }
 
-    /* subtle shadows */
-    .page-shadow{position:absolute;inset:0;pointer-events:none;z-index:5}
-
-    /* controls - absolutely positioned relative to book-shell so it's always centered below the book */
-    .controls{display:flex;gap:10px;align-items:center;justify-content:center;width:auto;box-sizing:border-box;padding:8px 12px;position:absolute;left:50%;transform:translateX(-50%);bottom:-72px;z-index:90;background:transparent}
-    button{padding:8px 14px;border-radius:8px;border:1px solid rgba(0,0,0,.08);background:#fff;cursor:pointer}
-    button:disabled{opacity:.5;cursor:not-allowed}
-    .info{font-size:14px;color:#444;text-align:center;min-width:120px}
-    .tips{font-size:13px;color:#666;max-width:900px;text-align:center;margin-top:6px;position:relative;z-index:5}
-
-    /* responsive small screens */
-    @media (max-width:720px){:root{--book-width:360px;--book-height:520px}.book{flex-direction:column}.page-left,.page-right{width:100%;height:50%}.flipper{left:0;width:100%;transform-origin:center center}.controls{position:static;transform:none;margin-top:8px;bottom:auto}.underlay{left:0;width:100%}}
-
-    /* helper classes for interactive state */
-    .dragging { cursor:grabbing }
-  </style>
+  /* simple controls */
+  .controls{ margin-top:18px; display:flex; gap:12px; }
+  button{ padding:8px 14px; border-radius:8px; border:1px solid #999; background:white; cursor:pointer; }
+  button:disabled{ opacity:0.45; cursor:default; }
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="book-shell" id="bookShell">
-      <div class="book" id="book">
-        <div class="page-left" id="leftPage"><img class="page-img" id="leftImg" src="" alt="Left page"/></div>
-        <div class="page-right" id="rightPage"><img class="page-img" id="rightImg" src="" alt="Right page"/></div>
 
-        <div class="flipper hidden" id="flipper" aria-hidden="true">
-          <div class="face front"><img id="flipFront" src="" alt="flip front"/></div>
-          <div class="face back"><img id="flipBack" src="" alt="flip back"/></div>
-        </div>
-
-        <div class="underlay" id="underlay" aria-hidden="true"><img src="" alt="underlay"/></div>
-      </div>
-
-      <div class="controls">
-        <button id="prevBtn">◀ Prev</button>
-        <div class="info" id="pageInfo">Page 1 / 1</div>
-        <button id="nextBtn">Next ▶</button>
-      </div>
-    </div>
-
-    <div class="tips">Tips: drag the right page left to turn forward, drag the left page right to go back. Click for instant turn.</div>
+<div class="book" id="book">
+  <div class="left-page" id="leftPage">
+    <img id="leftImg" src="" alt="">
+    <div id="leftCover"></div>
   </div>
 
-  <script>
-    // ========== CONFIG ==========
-    const pages = [
-      'images/page1.jpg',
-      'images/page2.jpg',
-      'images/page3.jpg',
-      'images/page4.jpg',
-      'images/page5.jpg',
-      'images/page6.jpg',
-      'images/page9.jpg',
-      'images/page10.jpg',
-      'images/page11.jpg',
-      'images/page12.jpg',
-      'images/page13.jpg',
-      'images/page14.jpg',
-    ];
-    // ============================
+  <div class="right-stack" id="rightStack"></div>
+</div>
 
-    // DOM
-    const leftPageEl = document.getElementById('leftPage');
-    const leftImg = document.getElementById('leftImg');
-    const rightImg = document.getElementById('rightImg');
-    const flipFront = document.getElementById('flipFront');
-    const flipBack = document.getElementById('flipBack');
-    const flipper = document.getElementById('flipper');
-    const underlay = document.getElementById('underlay');
-    const book = document.getElementById('book');
-    const prevBtn = document.getElementById('prevBtn');
-    const nextBtn = document.getElementById('nextBtn');
-    const pageInfo = document.getElementById('pageInfo');
-    const bookShell = document.getElementById('bookShell');
+<div class="controls">
+  <button id="prevBtn">◀ Prev</button>
+  <button id="nextBtn">Next ▶</button>
+</div>
 
-    let currentRightIndex = 0;
+<script>
+/* =======================
+   CONFIG: page images (reading order)
+   Put files in images/ folder or change paths here
+   ======================= */
+const pages = [
+  "images/page1.jpg",
+  "images/page2.jpg",
+  "images/page3.jpg",
+  "images/page4.jpg",
+  "images/page5.jpg",
+  "images/page6.jpg"
+];
+/* ======================= */
 
-    // preload
-    const preloaded = []; let loadedCount = 0;
-    function preloadAll(){
-      pages.forEach((p,i)=>{
-        const img = new Image(); img.src = p; img.onload = ()=>{loadedCount++;}; img.onerror=()=>{loadedCount++;}; preloaded[i]=img;
-      });
-    }
-    preloadAll();
+/* Build spreads (pairs) */
+const spreads = [];
+for (let i = 0; i < pages.length; i += 2) {
+  spreads.push({ left: pages[i] || '', right: pages[i+1] || '' });
+}
 
-    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+const leftImg = document.getElementById('leftImg');
+const leftCover = document.getElementById('leftCover');
+const rightStack = document.getElementById('rightStack');
+const nextBtn = document.getElementById('nextBtn');
+const prevBtn = document.getElementById('prevBtn');
+const book = document.getElementById('book');
 
-    function updateView(){
-      const leftIndex = currentRightIndex - 1;
-      if(leftIndex >= 0 && pages[leftIndex]){ leftPageEl.classList.remove('is-blank'); leftImg.src = pages[leftIndex]; }
-      else { leftPageEl.classList.add('is-blank'); leftImg.src = pages[currentRightIndex] || ''; }
-      rightImg.src = pages[currentRightIndex] || '';
-      prevBtn.disabled = currentRightIndex <= 0;
-      nextBtn.disabled = currentRightIndex >= pages.length - 1;
-      const humanLeft = leftIndex >= 0 ? leftIndex + 1 : '-';
-      const humanRight = currentRightIndex + 1;
-      pageInfo.textContent = `Pages ${humanLeft} — ${humanRight} / ${pages.length}`;
-    }
+let flipped = 0;         // how many sheets are flipped (0..spreads.length)
+let isAnimating = false; // guard
 
-    updateView();
+/* Create sheets on right side (one per spread).
+   Each sheet has front = right-page, back = left-page.
+   The visual flip will rotate this sheet from 0 to -180deg.
+*/
+spreads.forEach((sp, idx) => {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.dataset.index = idx;
+  sheet.style.zIndex = 200 - idx;
 
-    // ---------- Interactive Drag Flip ----------
-    let pointerDown = false;
-    let isDragging = false;
-    let startX = 0;
-    let direction = null; // 'next' or 'prev'
-    let animFrame = null;
-    let progress = 0; // 0..1
-    const maxAngle = 180; // degrees
+  const front = document.createElement('div');
+  front.className = 'face front';
+  if (sp.right) front.innerHTML = `<img src="${sp.right}" alt="p${idx*2+2}">`;
 
-    function showFlipper(){ flipper.classList.remove('hidden'); underlay.classList.add('show'); }
-    function hideFlipper(){ flipper.classList.add('hidden'); underlay.classList.remove('show'); }
+  const back = document.createElement('div');
+  back.className = 'face back';
+  if (sp.left) back.innerHTML = `<img src="${sp.left}" alt="p${idx*2+1}">`;
 
-    function setFlipperImages(forDir){
-      if(forDir === 'next'){
-        flipFront.src = pages[currentRightIndex] || '';
-        flipBack.src = pages[currentRightIndex + 1] || '';
-        underlay.querySelector('img').src = pages[currentRightIndex + 1] || '';
+  sheet.appendChild(front);
+  sheet.appendChild(back);
+  rightStack.appendChild(sheet);
+});
+
+/* Initialize left image */
+leftImg.src = spreads[0] ? spreads[0].left : '';
+leftCover.style.width = '0%';
+
+/* Utility: easing cubic-bezier approx (easeOutQuad) */
+function easeOutQuad(t){ return 1 - (1 - t) * (1 - t); }
+
+/* Animate flip with requestAnimationFrame so we can update leftCover width and sheet shadow */
+function animateFlip(sheet, direction = 'next', duration = 900){
+  // direction: 'next' means rotate from 0 -> -180
+  // 'prev' means rotate from -180 -> 0
+  if (isAnimating) return Promise.reject('animating');
+
+  isAnimating = true;
+  setControls(false);
+
+  const start = performance.now();
+  const from = (direction === 'next') ? 0 : -180;
+  const to = (direction === 'next') ? -180 : 0;
+
+  // For leftCover we want progress 0->1 where 0 no cover, 1 full cover
+  // For next: progress = t, for prev: progress = t reversed
+  return new Promise((resolve) => {
+    function frame(now){
+      let t = Math.min(1, (now - start) / duration);
+      const eased = easeOutQuad(t);
+      const angle = from + (to - from) * eased;
+
+      // apply rotation (around left center)
+      sheet.style.transform = `rotateY(${angle}deg)`;
+
+      // compute cover progress: when angle moves from 0 to -90 the sheet starts covering,
+      // after -90 it recedes visually but we still keep coverage until end.
+      // We'll map eased progress to cover width linear 0..100%.
+      const coverProgress = (direction === 'next') ? eased : (1 - eased);
+      const coverPct = Math.round(coverProgress * 100);
+
+      // Set leftCover to show the same image as the sheet front (so it looks like sheet is covering)
+      const frontImg = sheet.querySelector('.face.front img');
+      const frontSrc = frontImg ? frontImg.src : '';
+      if (frontSrc) {
+        leftCover.style.backgroundImage = `url("${frontSrc}")`;
+        leftCover.style.backgroundPosition = 'right center';
+        leftCover.style.backgroundSize = 'cover';
       } else {
-        const leftIndex = currentRightIndex - 1;
-        flipFront.src = pages[leftIndex] || pages[currentRightIndex] || '';
-        flipBack.src = pages[currentRightIndex] || '';
-        underlay.querySelector('img').src = pages[leftIndex] || '';
+        leftCover.style.backgroundImage = '';
+      }
+
+      // grow/shrink leftCover width from 0 -> 100% (right aligned)
+      leftCover.style.width = `${coverPct}%`;
+
+      // dynamic shadow on sheet for depth
+      // stronger shadow around mid-flip
+      const shadowStrength = 0.25 + 0.45 * Math.sin(Math.PI * eased);
+      sheet.style.boxShadow = `-20px 8px 70px rgba(0,0,0,${shadowStrength})`;
+
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        // finalize: ensure final transform & cover states
+        sheet.style.transform = `rotateY(${to}deg)`;
+        leftCover.style.width = (direction === 'next') ? '100%' : '0%';
+        sheet.style.boxShadow = '';
+
+        // done
+        isAnimating = false;
+        setControls(true);
+        resolve();
       }
     }
+    requestAnimationFrame(frame);
+  });
+}
 
-    function applyProgress(p){
-      progress = clamp(p,0,1);
-      const eased = Math.sin(progress * Math.PI * 0.5); // easeOutSine
-      const angle = -maxAngle * eased * (direction === 'prev' ? -1 : 1);
-      const translateX = (direction === 'next') ? (-progress * 8) : (progress * 8);
-      const skew = (direction === 'next') ? (-progress * 3) : (progress * 3);
-      const z = 12 * eased;
-      const rot = `rotateY(${angle}deg)`;
-      flipper.style.transform = `translateZ(${z}px) translateX(${translateX}%) ${rot} skewY(${skew}deg)`;
-      const backfaceOpacity = Math.min(1, Math.max(0, (progress - 0.4) * 2.0));
-      const backEl = flipper.querySelector('.back'); if(backEl) backEl.style.opacity = backfaceOpacity;
-      underlay.style.transform = `translateZ(${z/1.5}px) scale(${1 + progress*0.015})`;
-      underlay.style.filter = `blur(${0.2 * progress}px)`;
-      book.style.boxShadow = `0 ${12 + 20*progress}px ${40 + 40*progress}px rgba(12,20,30,${0.12 + 0.12*progress})`;
-    }
+/* Flip next: animate sheet index = flipped (0-based) from 0->-180.
+   After animation ends, increment flipped and update left image to new spreads[flipped].left
+   Then clear leftCover (so underlying leftImg becomes visible)
+*/
+async function goNext(){
+  if (isAnimating) return;
+  if (flipped >= spreads.length - 1) return;
 
-    function animateTo(target, duration = 360){
-      const start = performance.now();
-      const from = progress;
-      const to = clamp(target,0,1);
-      if(animFrame) cancelAnimationFrame(animFrame);
-      function step(now){
-        const t = clamp((now - start) / duration, 0, 1);
-        const ease = t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
-        const value = from + (to - from) * ease;
-        applyProgress(value);
-        if(t < 1) animFrame = requestAnimationFrame(step);
-        else {
-          if(to === 1){
-            if(direction === 'next') currentRightIndex = clamp(currentRightIndex + 1, 0, pages.length - 1);
-            else if(direction === 'prev') currentRightIndex = clamp(currentRightIndex - 1, 0, pages.length - 1);
-            applyProgress(0);
-            hideFlipper();
-            updateView();
-          } else {
-            applyProgress(0);
-            hideFlipper();
-            updateView();
-          }
-          pointerDown = false; isDragging = false;
-          animFrame = null;
-          document.body.classList.remove('dragging');
-        }
-      }
-      animFrame = requestAnimationFrame(step);
-    }
+  const sheet = rightStack.querySelector(`.sheet[data-index="${flipped}"]`);
+  if (!sheet) return;
 
-    // pointer handlers
-    function onPointerDown(e){
-      if(animFrame) return;
-      const rect = book.getBoundingClientRect();
-      startX = (e.touches ? e.touches[0].clientX : e.clientX);
-      const relX = startX - rect.left;
-      const half = rect.width / 2;
-      if(relX > half * 0.55){ direction = 'next'; }
-      else if(relX < half * 0.45){ direction = 'prev'; }
-      else { direction = null; }
-      if(!direction) return;
-      pointerDown = true; isDragging = false;
-      document.body.classList.add('dragging');
-      setFlipperImages(direction);
-      showFlipper();
-      applyProgress(0);
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-      window.addEventListener('pointercancel', onPointerUp);
-      if(e.target.setPointerCapture) try{ e.target.setPointerCapture(e.pointerId); } catch(err){}
-    }
+  // Preload the new left image to avoid flash
+  const upcomingLeft = spreads[flipped + 1] ? spreads[flipped + 1].left : '';
+  if (upcomingLeft) {
+    const img = new Image();
+    img.src = upcomingLeft;
+  }
 
-    function onPointerMove(e){
-      if(!pointerDown) return;
-      const x = (e.touches ? e.touches[0].clientX : e.clientX);
-      const rect = book.getBoundingClientRect();
-      const half = rect.width / 2;
-      let delta = 0;
-      if(direction === 'next'){ delta = (startX - x); }
-      else { delta = (x - startX); }
-      if(!isDragging){ if(Math.abs(delta) > 6) isDragging = true; else return; }
-      const p = clamp(delta / (half), 0, 1);
-      applyProgress(p);
-    }
+  // animate
+  await animateFlip(sheet, 'next', 900);
 
-    function onPointerUp(e){
-      if(!pointerDown) return;
-      // if user didn't actually drag (a click), treat as click: complete full flip
-      if(!isDragging){ animateTo(1,360); return; }
-      const completionThreshold = 0.45;
-      const shouldComplete = progress > completionThreshold;
-      if(shouldComplete) animateTo(1,360);
-      else animateTo(0,280);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerUp);
-    }
+  // after animation: flip state, update leftImg to new left page, clear leftCover
+  flipped++;
+  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
+  // small timeout to let paint happen before hiding cover
+  setTimeout(() => leftCover.style.width = '0%', 40);
+}
 
-    // attach events
-    rightImg.addEventListener('pointerdown', onPointerDown);
-    leftImg.addEventListener('pointerdown', onPointerDown);
+/* Flip prev: animate sheet index = flipped-1 from -180->0.
+   Before animation we set leftCover to show the sheet front (which is the right page of that sheet),
+   but because animateFlip handles cover we just call it.
+   After animation ends we decrement flipped and update leftImg.
+*/
+async function goPrev(){
+  if (isAnimating) return;
+  if (flipped <= 0) return;
 
-    // click handlers for buttons (instant flip)
-    nextBtn.addEventListener('click', ()=>{
-      if(currentRightIndex < pages.length-1 && !pointerDown){
-        direction='next'; setFlipperImages('next'); showFlipper(); animateTo(1,380);
-      }
-    });
-    prevBtn.addEventListener('click', ()=>{
-      if(currentRightIndex>0 && !pointerDown){
-        direction='prev'; setFlipperImages('prev'); showFlipper(); animateTo(1,380);
-      }
-    });
+  const idx = flipped - 1;
+  const sheet = rightStack.querySelector(`.sheet[data-index="${idx}"]`);
+  if (!sheet) return;
 
-    // click on pages: trigger animated flip to corresponding direction (only if not dragging)
-    document.getElementById('rightPage').addEventListener('click',(e)=>{
-      if(isDragging) return;
-      if(currentRightIndex < pages.length-1){ direction='next'; setFlipperImages('next'); showFlipper(); animateTo(1,380); }
-    });
-    document.getElementById('leftPage').addEventListener('click',(e)=>{
-      if(isDragging) return;
-      if(currentRightIndex > 0){ direction='prev'; setFlipperImages('prev'); showFlipper(); animateTo(1,380); }
-    });
+  // Preload the left that will become visible (spreads[idx].left)
+  const upcomingLeft = spreads[idx] ? spreads[idx].left : '';
+  if (upcomingLeft) {
+    const img = new Image();
+    img.src = upcomingLeft;
+  }
 
-    // keyboard
-    document.addEventListener('keydown',(e)=>{ if(e.key==='ArrowRight'){ nextBtn.click(); } if(e.key==='ArrowLeft'){ prevBtn.click(); } });
+  // animate unflip
+  await animateFlip(sheet, 'prev', 900);
 
-    // touch support
-    book.addEventListener('touchstart',(e)=>{ onPointerDown(e); }, {passive:false});
+  // after animation: decrement flipped, update left image
+  flipped--;
+  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
+  // ensure cover gone
+  leftCover.style.width = '0%';
+}
 
-    // ensure page clicks still work when not dragging
-    document.getElementById('rightPage').addEventListener('click',()=>{});
-    document.getElementById('leftPage').addEventListener('click',()=>{});
+/* Controls enable/disable */
+function setControls(enabled){
+  nextBtn.disabled = !enabled || (flipped >= spreads.length - 1);
+  prevBtn.disabled = !enabled || (flipped <= 0);
+}
 
-    // expose debug
-    window._book = { pages, setPage(i){ currentRightIndex = clamp(i,0,pages.length-1); updateView(); } };
-  </script>
+/* Event handlers */
+nextBtn.addEventListener('click', goNext);
+prevBtn.addEventListener('click', goPrev);
+
+book.addEventListener('click', (e) => {
+  if (isAnimating) return;
+  const rect = book.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  if (clickX > rect.width / 2) goNext(); else goPrev();
+});
+
+// keyboard
+document.addEventListener('keydown', (e) => {
+  if (isAnimating) return;
+  if (e.key === 'ArrowRight') goNext();
+  if (e.key === 'ArrowLeft') goPrev();
+});
+
+// swipe
+let startX = null;
+book.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) startX = e.touches[0].clientX; }, {passive:true});
+book.addEventListener('touchend', (e) => {
+  if (startX === null) return;
+  const dx = e.changedTouches[0].clientX - startX;
+  startX = null;
+  if (Math.abs(dx) < 30) return;
+  if (dx < 0) goNext(); else goPrev();
+});
+
+/* Init controls */
+setControls(true);
+</script>
+
 </body>
 </html>
