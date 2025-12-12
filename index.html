@@ -1,517 +1,421 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Book Flip — Realistic Covering Flip (Next/Prev Cover Logic) + Zoom</title>
-<style>
-  :root{
-    --book-width:900px;
-    --book-height:600px;
-  }
-  *{box-sizing:border-box; user-select:none;}
-  html,body{height:100%;}
-  body{
-    margin:0;
-    min-height:100vh;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    flex-direction:column;
-    /* background gradient: blue -> maroon */
-    background: linear-gradient(135deg, #132440 0%, #6a0d4d 100%);
-    font-family:Arial, sans-serif;
-  }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Image Book Reader</title>
+  <meta name="description" content="Flip through a book made of images. Keyboard, touch, and smooth animations." />
+  <style>
+    :root{
+      --bg:#0d1117;
+      --panel:#161b22;
+      --text:#e6edf3;
+      --muted:#8b949e;
+      --accent:#58a6ff;
+      --accent-2:#7ee787;
+      --danger:#ff7b72;
+      --shadow:rgba(0,0,0,.4);
+      --page-w: min(820px, 92vw);
+      --page-h: calc(var(--page-w) * 1.414);
+      --radius: 10px;
+      --flip-dur: 500ms;
+      --ease: cubic-bezier(.2,.7,.2,1);
+    }
+    * { box-sizing: border-box }
+    html,body { height: 100% }
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    }
 
-  /* Container that will be scaled for zooming */
-  .book-viewport{
-    width: calc(var(--book-width));
-    height: calc(var(--book-height));
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    position:relative;
-    /* ensure transform-origin center for scaling */
-    transform-origin: center center;
-    transition: transform 260ms ease;
-  }
+    /* Removed header — controls moved overlaying book */
+    .btn{
+      appearance:none; border:1px solid #2a313a; background:#1b2230;
+      color:var(--text); padding:.5rem .75rem; border-radius:8px; cursor:pointer;
+      transition:transform .12s ease, border-color .12s ease, background .12s ease;
+      display:inline-flex; align-items:center; justify-content:center;
+    }
+    .btn:hover{ transform:translateY(-1px); border-color:#374151; background:#20283a }
+    .btn:focus{ outline:2px solid var(--accent); outline-offset:2px }
+    .btn[disabled]{ opacity:.5; cursor:not-allowed }
 
-  /* BOOK LAYOUT -------------------------------------------------- */
-  .book{
-    width:var(--book-width);
-    height:var(--book-height);
-    display:flex;
-    position:relative;
-    box-shadow:0 18px 50px rgba(0,0,0,0.15);
-    background:#000;
-    overflow:visible;
-  }
+    main{
+      width:100%; max-width:var(--page-w); margin:1rem auto; padding:0; flex:1;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:1rem;
+      position:relative;
+    }
+    .book{
+      width:var(--page-w); height:var(--page-h);
+      background:#0c1424; border-radius:var(--radius);
+      box-shadow:0 10px 30px var(--shadow);
+      position:relative; overflow:hidden;
+      border:1px solid #1f2a3d;
+    }
+    .page{
+      position:absolute; inset:0; display:grid; place-items:center;
+      will-change:transform, opacity; backface-visibility:hidden;
+    }
+    .page img{
+      max-width:100%; max-height:100%;
+      width:100%; height:100%; object-fit:contain;
+      background:#0b1321;
+    }
+    .flip-enter{
+      transform: translateX(100%) rotateY(-10deg);
+      opacity:.0;
+    }
+    .flip-enter-active{
+      transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
+      transform: translateX(0) rotateY(0);
+      opacity:1;
+    }
+    .flip-exit{
+      transform: translateX(0) rotateY(0);
+      opacity:1;
+    }
+    .flip-exit-active{
+      transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
+      transform: translateX(-100%) rotateY(10deg);
+      opacity:0;
+    }
+    .flip-enter-rtl{ transform: translateX(-100%) rotateY(10deg); opacity:.0 }
+    .flip-enter-active-rtl{
+      transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
+      transform: translateX(0) rotateY(0); opacity:1
+    }
+    .flip-exit-rtl{ transform: translateX(0) rotateY(0); opacity:1 }
+    .flip-exit-active-rtl{
+      transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
+      transform: translateX(100%) rotateY(-10deg); opacity:0
+    }
 
-  .left-page{
-    width:50%;
-    height:100%;
-    background:#fff;
-    overflow:hidden;
-    position:relative;
-    z-index:1;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
+    /* Overlay Prev/Next arrow buttons (middle-left and middle-right) */
+    .nav-btn{
+      position:absolute;
+      top:50%;
+      transform:translateY(-50%);
+      width:54px;
+      height:54px;
+      border-radius:999px;
+      display:grid;
+      place-items:center;
+      font-size:22px;
+      line-height:1;
+      background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.12));
+      border:1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 6px 18px rgba(2,6,23,0.6);
+      color:var(--text);
+      z-index:6;
+      backdrop-filter: blur(4px);
+    }
+    .nav-btn:hover{ transform:translateY(-50%) scale(1.03) }
+    .nav-btn:active{ transform:translateY(-50%) scale(.98) }
+    .nav-prev{ left:12px; }
+    .nav-next{ right:12px; }
 
-  /* Left page image: show full image (contain) and center it */
-  .left-page img{
-    max-width:100%;
-    max-height:100%;
-    width:auto;
-    height:auto;
-    object-fit:contain;
-    display:block;
-    -webkit-user-drag:none;
-    user-drag:none;
-    user-select:none;
-  }
-
-  /* left cover (growing overlay from right to left) */
-  #leftCover{
-    position:absolute;
-    top:0;
-    right:0;
-    height:100%;
-    width:0%;
-    background-position:center center;
-    background-size:contain;
-    background-repeat:no-repeat;
-    pointer-events:none;
-    z-index:5;
-    box-shadow: inset -40px 0 60px rgba(0,0,0,0.35);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
-
-  .right-stack{
-    width:50%;
-    height:100%;
-    position:relative;
-    perspective:2000px;
-    overflow:visible;
-    background:#fff;
-  }
-
-  /* sheet that rotates */
-  .sheet{
-    width:100%;
-    height:100%;
-    position:absolute;
-    top:0;
-    left:0;
-    transform-style:preserve-3d;
-    transform-origin:left center;
-    z-index:50;
-    will-change:transform, box-shadow;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:transparent;
-  }
-
-  .face{
-    width:100%;
-    height:100%;
-    position:absolute;
-    backface-visibility:hidden;
-    overflow:hidden;
-    background:#fff;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
-
-  .face img{
-    max-width:100%;
-    max-height:100%;
-    width:auto;
-    height:auto;
-    object-fit:contain;
-    display:block;
-    -webkit-user-drag:none;
-    user-drag:none;
-    user-select:none;
-  }
-
-  .back{ transform:rotateY(180deg); }
-
-  /* Right-side vertical controls for zoom */
-  .zoom-controls{
-    position:fixed;
-    right:18px;
-    top:50%;
-    transform:translateY(-50%);
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-    z-index:9999;
-    /* slight translucent backdrop for legibility */
-    padding:0px;
-    border-radius:12px;
-    backdrop-filter: blur(6px);
-  }
-
-  .zoom-controls button{
-    padding:10px 10px;
-    border-radius:120px;
-    border:1px solid rgba(255,255,255,0.25);
-    background:rgba(255,255,255,0.95);
-    cursor:pointer;
-    font-size:16px;
-    min-width:5px;
-    box-shadow: 0 6px 10px rgba(0,0,0,0.15);
-  }
-
-  .zoom-controls button:active{ transform:translateY(1px); }
-  .zoom-controls button:disabled{ opacity:0.5; cursor:default; }
-
-  /* small helper label (optional) */
-  .zoom-label{
-    text-align:center;
-    font-size:12px;
-    color:#fff;
-    margin-bottom:6px;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.35);
-  }
-
-  /* Responsive tweaks (shrink buttons a bit on narrow screens) */
-  @media (max-width:520px){
-    .zoom-controls button{ padding:10px 12px; font-size:14px; min-width:64px; }
-    .zoom-controls{ right:10px; gap:8px; }
-  }
-
-</style>
+    .controls{
+      display:flex; align-items:center; gap:.75rem; width:100%;
+      background:var(--panel); border:1px solid #20262e;
+      padding:.75rem; border-radius:10px;
+    }
+    .counter{ font-variant-numeric: tabular-nums; color:var(--muted) }
+    .slider{
+      -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:999px;
+      background:#293243; outline:none;
+    }
+    .slider::-webkit-slider-thumb{
+      -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%;
+      background:var(--accent); box-shadow:0 0 0 2px #111827;
+      cursor:pointer;
+    }
+    .slider::-moz-range-thumb{
+      width:18px; height:18px; border-radius:50%; background:var(--accent); border:none; cursor:pointer;
+    }
+    footer{
+      color:var(--muted); text-align:center; padding:.5rem 1rem 1rem;
+    }
+    @media (prefers-reduced-motion: reduce){
+      .flip-enter, .flip-enter-rtl { transform:none }
+      .flip-enter-active, .flip-enter-active-rtl,
+      .flip-exit-active, .flip-exit-active-rtl { transition:none }
+    }
+    @media (max-width:600px){
+      :root{ --page-w: 94vw; }
+      .counter{ font-size:.9rem }
+      .nav-btn{ width:44px; height:44px; font-size:18px }
+      .nav-prev{ left:8px } .nav-next{ right:8px }
+    }
+  </style>
 </head>
 <body>
+  <main>
+    <div class="book" id="book" aria-live="polite" aria-label="Book viewer"></div>
 
-<!-- viewport is the element that will be scaled -->
-<div class="book-viewport" id="bookViewport">
-  <div class="book" id="book">
-    <div class="left-page" id="leftPage">
-      <img id="leftImg" src="" alt="">
-      <div id="leftCover"></div>
+    <!-- Overlay arrow-only navigation -->
+    <button class="nav-btn nav-prev" id="btnPrev" aria-label="Previous page" title="Previous page">⟵</button>
+    <button class="nav-btn nav-next" id="btnNext" aria-label="Next page" title="Next page">⟶</button>
+
+    <div class="controls" style="max-width:var(--page-w);">
+      <span class="counter" id="counter">Page 1 / 1</span>
+      <input type="range" class="slider" id="slider" min="1" max="1" value="1" aria-label="Go to page" />
+      <button class="btn" id="btnFirst" aria-label="First page">First</button>
+      <button class="btn" id="btnLast" aria-label="Last page">Last</button>
     </div>
+  </main>
 
-    <div class="right-stack" id="rightStack"></div>
-  </div>
-</div>
+  <footer>
+    <small>Use arrow keys or swipe to flip pages. Hash links like #12 jump to page 12.</small>
+  </footer>
 
-<!-- Right-side zoom controls -->
-<div class="zoom-controls" id="zoomControls" aria-hidden="false">
-  <div class="zoom-label">Zoom</div>
-  <button id="zoomInBtn" aria-label="Zoom In">＋</button>
-  <button id="zoomOutBtn" aria-label="Zoom Out">－</button>
-  <button id="fitBtn" aria-label="Fit to Screen">Fit</button>
-</div>
-
-<script>
-/* =======================
-   CONFIG: page images (reading order)
-   ======================= */
-const pages = [
+  <script>
+    // 1) Configure your image pages here (in order):
+    const PAGES = [
       "images/page1.jpg",
-  "images/page2.jpg",
-  "images/page3.jpg",
-  "images/page4.jpg",
-  "images/page5.jpg",
-  "images/page6.jpg",
-  "images/page7.jpg",
-  "images/page8.jpg",
-  "images/page9.jpg",
-  "images/page10.jpg",
-  "images/page11.jpg",
-   "images/page12.jpg",
-  "images/page13.jpg",
-  "images/page14.jpg",
-  "images/page15.jpg",
-  "images/page16.jpg",
-  "images/page17.jpg",
-  "images/page18.jpg",
-  "images/page19.jpg",
-  "images/page20.jpg",
-  "images/page21.jpg",
-  "images/page22.jpg",
-  "images/page23.jpg",
-  "images/page24.jpg",
-  "images/page25.jpg",
-  "images/page26.jpg",
-  "images/page27.jpg",
-  "images/page28.jpg",
-  "images/page29.jpg",
-  "images/page30.jpg",
-  "images/page31.jpg",
-  "images/page32.jpg",
-  "images/page33.jpg",
-  "images/page34.jpg",
-  "images/page35.jpg",
-  "images/page36.jpg",
-  "images/page37.jpg",
-  "images/page38.jpg",
-  "images/page39.jpg",
-  "images/page40.jpg",
-  "images/page41.jpg",
-  "images/page42.jpg",
-  "images/page43.jpg",
-  "images/page44.jpg",
-  "images/page45.jpg",
-  "images/page46.jpg",
-  "images/page47.jpg",
-  "images/page48.jpg",
-  "images/page49.jpg",
-  "images/page50.jpg",
-  "images/page51.jpg",
-  "images/page52.jpg",
-  "images/page53.jpg",
-  "images/page54.jpg",
-];
-/* ======================= */
+      "images/page2.jpg",
+      "images/page3.jpg",
+      "images/page4.jpg",
+      "images/page5.jpg",
+      "images/page6.jpg",
+      "images/page7.jpg",
+      "images/page8.jpg",
+      "images/page9.jpg",
+      "images/page10.jpg",
+      "images/page11.jpg",
+      "images/page12.jpg",
+      "images/page13.jpg",
+      "images/page14.jpg",
+      "images/page15.jpg",
+      "images/page16.jpg",
+      "images/page17.jpg",
+      "images/page18.jpg",
+      "images/page19.jpg",
+      "images/page20.jpg",
+      "images/page21.jpg",
+      "images/page22.jpg",
+      "images/page23.jpg",
+      "images/page24.jpg",
+      "images/page25.jpg",
+      "images/page26.jpg",
+      "images/page27.jpg",
+      "images/page28.jpg",
+      "images/page29.jpg",
+      "images/page30.jpg",
+      "images/page31.jpg",
+      "images/page32.jpg",
+      "images/page33.jpg",
+      "images/page34.jpg",
+      "images/page35.jpg",
+      "images/page36.jpg",
+      "images/page37.jpg",
+      "images/page38.jpg",
+      "images/page39.jpg",
+      "images/page40.jpg",
+      "images/page41.jpg",
+      "images/page42.jpg",
+      "images/page43.jpg",
+      "images/page44.jpg",
+      "images/page45.jpg",
+      "images/page46.jpg",
+      "images/page47.jpg",
+      "images/page48.jpg",
+      "images/page49.jpg",
+      "images/page50.jpg",
+      "images/page51.jpg",
+      "images/page52.jpg",
+      "images/page53.jpg",
+      "images/page54.jpg",
+      // Add more...
+    ];
 
-/* Build spreads (pairs) */
-const spreads = [];
-for (let i = 0; i < pages.length; i += 2) {
-  spreads.push({ left: pages[i] || '', right: pages[i+1] || '' });
-}
+    // 2) Settings
+    const STORAGE_KEY = "image-book-last-page";
+    const bookEl = document.getElementById("book");
+    const counterEl = document.getElementById("counter");
+    const sliderEl = document.getElementById("slider");
+    const btnPrev = document.getElementById("btnPrev");
+    const btnNext = document.getElementById("btnNext");
+    const btnFirst = document.getElementById("btnFirst");
+    const btnLast = document.getElementById("btnLast");
 
-const leftImg = document.getElementById('leftImg');
-const leftCover = document.getElementById('leftCover');
-const rightStack = document.getElementById('rightStack');
-const book = document.getElementById('book');
-const bookViewport = document.getElementById('bookViewport');
+    let current = 1; // 1-based
+    let animating = false;
 
-const zoomInBtn = document.getElementById('zoomInBtn');
-const zoomOutBtn = document.getElementById('zoomOutBtn');
-const fitBtn = document.getElementById('fitBtn');
+    // Initialize
+    sliderEl.max = String(PAGES.length);
+    restoreFromHashOrStorage();
+    renderPage(null);
 
-let flipped = 0;         // how many sheets are flipped (0..spreads.length-1)
-let isAnimating = false; // guard
+    // Events
+    btnPrev.addEventListener("click", () => goTo(current - 1, {dir:"rtl"}));
+    btnNext.addEventListener("click", () => goTo(current + 1, {dir:"ltr"}));
+    btnFirst.addEventListener("click", () => goTo(1, {dir:"rtl"}));
+    btnLast.addEventListener("click", () => goTo(PAGES.length, {dir:"ltr"}));
+    sliderEl.addEventListener("input", e => goTo(Number(e.target.value), {dir: (Number(e.target.value) >= current ? "ltr" : "rtl")}));
 
-/* Create sheets on right side */
-spreads.forEach((sp, idx) => {
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.dataset.index = idx;
-  sheet.style.zIndex = 200 - idx;
+    window.addEventListener("keydown", e => {
+      if (e.key === "ArrowRight") goTo(current + 1, {dir:"ltr"});
+      else if (e.key === "ArrowLeft") goTo(current - 1, {dir:"rtl"});
+      else if (e.key === "Home") goTo(1, {dir:"rtl"});
+      else if (e.key === "End") goTo(PAGES.length, {dir:"ltr"});
+    });
 
-  const front = document.createElement('div');
-  front.className = 'face front';
-  if (sp.right) front.innerHTML = `<img src="${sp.right}" alt="p${idx*2+2}">`;
+    window.addEventListener("hashchange", () => {
+      const n = pageFromHash();
+      if (n) goTo(n, {dir: n >= current ? "ltr" : "rtl"});
+    });
 
-  const back = document.createElement('div');
-  back.className = 'face back';
-  if (sp.left) back.innerHTML = `<img src="${sp.left}" alt="p${idx*2+1}">`;
+    // Touch swipe
+    let touchStartX = null;
+    bookEl.addEventListener("touchstart", e => {
+      touchStartX = e.changedTouches[0].clientX;
+    }, {passive:true});
+    bookEl.addEventListener("touchend", e => {
+      if (touchStartX == null) return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 40) {
+        if (dx < 0) goTo(current + 1, {dir:"ltr"}); // swipe left -> next
+        else goTo(current - 1, {dir:"rtl"});        // swipe right -> prev
+      }
+      touchStartX = null;
+    }, {passive:true});
 
-  sheet.appendChild(front);
-  sheet.appendChild(back);
-  rightStack.appendChild(sheet);
-});
+    // Helpers
+    function goTo(n, {dir} = {dir:"ltr"}){
+      if (animating) return;
+      n = clamp(n, 1, PAGES.length);
+      if (n === current) return;
 
-/* Initialize left image */
-leftImg.src = spreads[0] ? spreads[0].left : '';
-leftCover.style.width = '0%';
+      animating = true;
+      const oldPage = bookEl.querySelector(".page");
+      const newPage = createPage(n);
 
-/* Utility easing */
-function easeOutQuad(t){ return 1 - (1 - t) * (1 - t); }
+      // Prepare classes for animation
+      const enterClass = dir === "rtl" ? "flip-enter-rtl" : "flip-enter";
+      const enterActiveClass = dir === "rtl" ? "flip-enter-active-rtl" : "flip-enter-active";
+      const exitClass = dir === "rtl" ? "flip-exit-rtl" : "flip-exit";
+      const exitActiveClass = dir === "rtl" ? "flip-exit-active-rtl" : "flip-exit-active";
 
-/* Animate flip (same logic as before) */
-function animateFlip(sheet, direction = 'next', duration = 900){
-  if (isAnimating) return Promise.reject('animating');
+      newPage.classList.add(enterClass);
+      bookEl.appendChild(newPage);
+      // Force reflow
+      void newPage.offsetWidth;
+      newPage.classList.add(enterActiveClass);
 
-  let coverSrc = '';
-  if (direction === 'next') {
-    coverSrc = sheet.querySelector('.face.back img')?.src || spreads[flipped + 1]?.left || sheet.querySelector('.face.front img')?.src || '';
-  } else {
-    coverSrc = sheet.querySelector('.face.front img')?.src || spreads[flipped - 1]?.right || sheet.querySelector('.face.back img')?.src || '';
-  }
+      if (oldPage){
+        oldPage.classList.add(exitClass);
+        // Force reflow
+        void oldPage.offsetWidth;
+        oldPage.classList.add(exitActiveClass);
+      }
 
-  if (coverSrc) {
-    leftCover.style.backgroundImage = `url("${coverSrc}")`;
-    leftCover.style.backgroundPosition = 'center center';
-    leftCover.style.backgroundSize = 'contain';
-    leftCover.style.backgroundRepeat = 'no-repeat';
-  } else {
-    leftCover.style.backgroundImage = '';
-  }
+      const onAnimEnd = () => {
+        if (oldPage) oldPage.remove();
+        newPage.classList.remove(enterClass, enterActiveClass);
+        current = n;
+        updateUI();
+        animating = false;
+        preloadNeighbors();
+      };
 
-  isAnimating = true;
-  setControls(false);
+      const dur = getComputedStyle(newPage).getPropertyValue("--flip-dur");
+      const ms = parseTime(dur) || 500;
+      setTimeout(onAnimEnd, ms);
+      saveState();
+      updateHash();
+    }
 
-  const start = performance.now();
-  const from = (direction === 'next') ? 0 : -180;
-  const to = (direction === 'next') ? -180 : 0;
+    function renderPage(dir){
+      const page = createPage(current);
+      if (dir === "rtl") page.classList.add("flip-enter-rtl");
+      else if (dir === "ltr") page.classList.add("flip-enter");
+      bookEl.innerHTML = "";
+      bookEl.appendChild(page);
+      // settle
+      requestAnimationFrame(() => {
+        page.classList.add(dir === "rtl" ? "flip-enter-active-rtl" : "flip-enter-active");
+        setTimeout(() => {
+          page.classList.remove("flip-enter", "flip-enter-rtl", "flip-enter-active", "flip-enter-active-rtl");
+        }, parseTime(getComputedStyle(page).getPropertyValue("--flip-dur")) || 500);
+      });
+      updateUI();
+      preloadNeighbors();
+    }
 
-  return new Promise((resolve) => {
-    function frame(now){
-      let t = Math.min(1, (now - start) / duration);
-      const eased = easeOutQuad(t);
-      const angle = from + (to - from) * eased;
+    function createPage(n){
+      const wrap = document.createElement("div");
+      wrap.className = "page";
+      const img = document.createElement("img");
+      img.alt = `Page ${n}`;
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.src = PAGES[n-1];
+      wrap.appendChild(img);
+      return wrap;
+    }
 
-      sheet.style.transform = `rotateY(${angle}deg)`;
+    function updateUI(){
+      counterEl.textContent = `Page ${current} / ${PAGES.length}`;
+      sliderEl.value = String(current);
+      btnPrev.disabled = current <= 1;
+      btnFirst.disabled = current <= 1;
+      btnNext.disabled = current >= PAGES.length;
+      btnLast.disabled = current >= PAGES.length;
+      document.title = `Page ${current} • Image Book Reader`;
+    }
 
-      const coverProgress = (direction === 'next') ? eased : (1 - eased);
-      const coverPct = Math.round(coverProgress * 100);
-      leftCover.style.width = `${coverPct}%`;
+    function preloadNeighbors(){
+      const next = current + 1 <= PAGES.length ? current + 1 : null;
+      const prev = current - 1 >= 1 ? current - 1 : null;
+      [prev, next].forEach(n => {
+        if (!n) return;
+        const img = new Image();
+        img.src = PAGES[n-1];
+      });
+    }
 
-      const shadowStrength = 0.25 + 0.45 * Math.sin(Math.PI * eased);
-      sheet.style.boxShadow = `-20px 8px 70px rgba(0,0,0,${shadowStrength})`;
+    function clamp(x, a, b){ return Math.max(a, Math.min(b, x)) }
 
-      if (t < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        sheet.style.transform = `rotateY(${to}deg)`;
-        leftCover.style.width = (direction === 'next') ? '100%' : '0%';
-        sheet.style.boxShadow = '';
+    function parseTime(s){
+      if (!s) return 0;
+      s = String(s).trim();
+      if (s.endsWith("ms")) return parseFloat(s);
+      if (s.endsWith("s")) return parseFloat(s) * 1000;
+      return parseFloat(s) || 0;
+    }
 
-        isAnimating = false;
-        setControls(true);
-        resolve();
+    function saveState(){
+      try { localStorage.setItem(STORAGE_KEY, String(current)); } catch {}
+    }
+    function loadState(){
+      try {
+        const v = Number(localStorage.getItem(STORAGE_KEY));
+        if (Number.isFinite(v) && v >= 1 && v <= PAGES.length) return v;
+      } catch {}
+      return null;
+    }
+
+    function updateHash(){
+      if (location.hash !== `#${current}`){
+        history.replaceState(null, "", `#${current}`);
       }
     }
-    requestAnimationFrame(frame);
-  });
-}
-
-/* Flip next */
-async function goNext(){
-  if (isAnimating) return;
-  if (flipped >= spreads.length - 1) return;
-
-  const sheet = rightStack.querySelector(`.sheet[data-index="${flipped}"]`);
-  if (!sheet) return;
-
-  const upcomingLeft = spreads[flipped + 1] ? spreads[flipped + 1].left : '';
-  if (upcomingLeft) { const img = new Image(); img.src = upcomingLeft; }
-
-  await animateFlip(sheet, 'next', 900);
-
-  flipped++;
-  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
-  setTimeout(() => leftCover.style.width = '0%', 40);
-}
-
-/* Flip prev */
-async function goPrev(){
-  if (isAnimating) return;
-  if (flipped <= 0) return;
-
-  const idx = flipped - 1;
-  const sheet = rightStack.querySelector(`.sheet[data-index="${idx}"]`);
-  if (!sheet) return;
-
-  const upcomingLeft = spreads[idx] ? spreads[idx].left : '';
-  if (upcomingLeft) { const img = new Image(); img.src = upcomingLeft; }
-
-  await animateFlip(sheet, 'prev', 900);
-
-  flipped--;
-  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
-  leftCover.style.width = '0%';
-}
-
-/* Controls enable/disable (for flipping) */
-function setControls(enabled){
-  // flipping controls are keyboard/click/touch; keep them gated by isAnimating and bounds
-  // Buttons here are zoom controls; keep them always enabled
-  // but we can still prevent flipping when animating (handled elsewhere)
-}
-
-/* Event handlers (click on book to flip) */
-book.addEventListener('click', (e) => {
-  if (isAnimating) return;
-  const rect = book.getBoundingClientRect();
-  const clickX = e.clientX - rect.left;
-  if (clickX > rect.width / 2) goNext(); else goPrev();
-});
-
-/* keyboard for flipping */
-document.addEventListener('keydown', (e) => {
-  if (isAnimating) return;
-  if (e.key === 'ArrowRight') goNext();
-  if (e.key === 'ArrowLeft') goPrev();
-});
-
-/* swipe */
-let startX = null;
-book.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) startX = e.touches[0].clientX; }, {passive:true});
-book.addEventListener('touchend', (e) => {
-  if (startX === null) return;
-  const dx = e.changedTouches[0].clientX - startX;
-  startX = null;
-  if (Math.abs(dx) < 30) return;
-  if (dx < 0) goNext(); else goPrev();
-});
-
-/* =========================
-   ZOOM / FIT implementation
-   - scale is applied to .book-viewport
-   - Fit computes a scale so book fits inside 90% of viewport
-   ========================= */
-let scale = 1;
-const minScale = 0.2;
-const maxScale = 3.0;
-
-/* Apply scale to viewport */
-function applyScale(){
-  bookViewport.style.transform = `scale(${scale})`;
-  // update disabled state of zoom buttons based on caps
-  zoomInBtn.disabled = scale >= maxScale - 0.001;
-  zoomOutBtn.disabled = scale <= minScale + 0.001;
-}
-
-/* Zoom multipliers */
-function zoomIn(){
-  scale = Math.min(maxScale, scale * 1.15);
-  applyScale();
-}
-function zoomOut(){
-  scale = Math.max(minScale, scale / 1.15);
-  applyScale();
-}
-
-/* Compute fit scale: fit to 90% of viewport width/height */
-function computeFitScale(){
-  const paddingFactor = 0.9; // leave 10% margin
-  const viewportW = window.innerWidth;
-  const viewportH = window.innerHeight;
-  // book natural sizes (from CSS root)
-  const bookW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--book-width')) || book.offsetWidth;
-  const bookH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--book-height')) || book.offsetHeight;
-  const scaleW = (viewportW * paddingFactor) / bookW;
-  const scaleH = (viewportH * paddingFactor) / bookH;
-  return Math.max(minScale, Math.min(maxScale, Math.min(scaleW, scaleH)));
-}
-
-/* Fit button action */
-function fitToScreen(){
-  scale = computeFitScale();
-  applyScale();
-}
-
-/* Button event listeners */
-zoomInBtn.addEventListener('click', () => { zoomIn(); });
-zoomOutBtn.addEventListener('click', () => { zoomOut(); });
-fitBtn.addEventListener('click', () => { fitToScreen(); });
-
-/* Recompute fit scale on resize so Fit always uses current viewport */
-window.addEventListener('resize', () => {
-  // keep current scale but update Fit available value (no visual change)
-  // optionally adjust if current scale would push beyond max/min (not necessary)
-  applyScale();
-});
-
-/* Initialize */
-applyScale();
-
-/* Init controls for flipping (no UI prev/next now) */
-setControls(true);
-
-</script>
-
+    function pageFromHash(){
+      const n = Number((location.hash || "").replace("#",""));
+      return Number.isFinite(n) && n >= 1 && n <= PAGES.length ? n : null;
+    }
+    function restoreFromHashOrStorage(){
+      const fromHash = pageFromHash();
+      const fromStore = loadState();
+      current = fromHash ?? fromStore ?? 1;
+      sliderEl.value = String(current);
+      sliderEl.max = String(PAGES.length);
+    }
+  </script>
 </body>
 </html>
