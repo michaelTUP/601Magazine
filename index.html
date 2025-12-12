@@ -3,113 +3,124 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Book Flip — Simple Page Flip Only</title>
+<title>Book Flip — Fullscreen</title>
+
 <style>
   html, body {
-    overflow: hidden; /* prevent scrollbars during flip */
+    margin:0; padding:0;
+    width:100%; height:100%;
+    overflow:hidden; /* no scrollbars */
+    background:#e9e9ea;
+    user-select:none;
   }
 
-  :root{ --book-width:900px; --book-height:600px; }
-  *{box-sizing:border-box; user-select:none;}
-  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; background:#eee; font-family:Arial, sans-serif; }
-
-  .book{
-    width:var(--book-width);
-    height:var(--book-height);
-    display:flex;
-    position:relative;
-    box-shadow:0 18px 50px rgba(0,0,0,0.15);
-    background:#000;
-    overflow:hidden; /* also ensures no internal scrollbars */
+  :root{
+    --page-bg:#fff;
   }
 
-  .left-page{
-    width:50%;
+  *{ box-sizing:border-box; -webkit-user-drag:none; }
+
+  /* The BOOK fills the viewport height */
+  .book-area {
+    width:100%;
     height:100%;
-    background:#fff;
-    overflow:hidden;
-    position:relative;
-    z-index:1;
     display:flex;
     align-items:center;
     justify-content:center;
   }
 
-  .left-page img{
-    max-width:100%;
-    max-height:100%;
-    width:auto;
-    height:auto;
-    object-fit:contain;
-    display:block;
+  .book{
+    height:95vh;                /* Fullscreen height */
+    aspect-ratio:3/2;           /* Keep natural book shape */
+    display:flex;
+    background:#ddd;
+    box-shadow:0 24px 60px rgba(0,0,0,0.18);
+    border-radius:4px;
+    overflow:hidden;
+    position:relative;
   }
 
-  .right-stack{
-    width:50%;
-    height:100%;
+  /* Left Page */
+  .left-page{
+    width:50%; height:100%;
+    background:var(--page-bg);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
     position:relative;
+    padding:10px;
+  }
+
+  /* Crossfade support */
+  .img-wrap{ width:100%; height:100%; position:relative; }
+  .img-wrap img{
+    position:absolute;
+    width:100%; height:100%;
+    object-fit:contain;
+    transition:opacity .25s ease;
+  }
+
+  /* Right Stack */
+  .right-stack{
+    width:50%; height:100%;
     perspective:2000px;
-    overflow:visible;
-    background:#fff;
+    position:relative;
+    padding:10px;
+    background:var(--page-bg);
   }
 
   .sheet{
-    width:100%;
-    height:100%;
-    position:absolute;
-    top:0;
-    left:0;
+    width:100%; height:100%;
+    position:absolute; top:0; left:0;
     transform-style:preserve-3d;
     transform-origin:left center;
-    z-index:50;
-    will-change:transform, box-shadow;
+    pointer-events:none;
   }
 
   .face{
-    width:100%;
-    height:100%;
     position:absolute;
+    width:100%; height:100%;
     backface-visibility:hidden;
-    overflow:hidden;
     background:#fff;
     display:flex;
     align-items:center;
     justify-content:center;
+    overflow:hidden;
+    border-radius:3px;
   }
 
   .face img{
     max-width:100%;
     max-height:100%;
-    width:auto;
-    height:auto;
     object-fit:contain;
-    display:block;
   }
 
   .back{ transform:rotateY(180deg); }
 
-  .controls{ margin-top:18px; display:flex; gap:12px; }
-  button{ padding:8px 14px; border-radius:8px; border:1px solid #999; background:white; cursor:pointer; }
-  button:disabled{ opacity:0.45; cursor:default; }
+  /* No buttons anymore */
 </style>
-
 </head>
+
 <body>
 
-<div class="book" id="book">
-  <div class="left-page" id="leftPage">
-    <img id="leftImg" src="" alt="">
+<div class="book-area">
+  <div class="book" id="book">
+
+    <div class="left-page">
+      <div class="img-wrap">
+        <img id="leftA" style="opacity:1">
+        <img id="leftB" style="opacity:0">
+      </div>
+    </div>
+
+    <div class="right-stack" id="rightStack"></div>
+
   </div>
-
-  <div class="right-stack" id="rightStack"></div>
-</div>
-
-<div class="controls">
-  <button id="prevBtn">◀ Prev</button>
-  <button id="nextBtn">Next ▶</button>
 </div>
 
 <script>
+/* pages */
 const pages = [
   "images/page1.jpg",
   "images/page2.jpg",
@@ -119,120 +130,133 @@ const pages = [
   "images/page6.jpg"
 ];
 
+/* Build spreads (left/right) */
 const spreads = [];
-for (let i = 0; i < pages.length; i += 2) {
-  spreads.push({ left: pages[i] || '', right: pages[i+1] || '' });
+for (let i=0;i<pages.length;i+=2){
+  spreads.push({ left:pages[i]||'', right:pages[i+1]||'' });
 }
 
-const leftImg = document.getElementById('leftImg');
+/* elements */
+const leftA = document.getElementById('leftA');
+const leftB = document.getElementById('leftB');
+let leftFlag = true;
+
 const rightStack = document.getElementById('rightStack');
-const nextBtn = document.getElementById('nextBtn');
-const prevBtn = document.getElementById('prevBtn');
 const book = document.getElementById('book');
 
 let flipped = 0;
-let isAnimating = false;
+let animating = false;
 
-/* Build sheet pages */
-spreads.forEach((sp, idx) => {
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.dataset.index = idx;
-  sheet.style.zIndex = 200 - idx;
+/* Build right sheets */
+spreads.forEach((sp, idx)=>{
+  const s = document.createElement('div');
+  s.className='sheet';
+  s.dataset.index=idx;
+  s.style.zIndex = 200 - idx;
 
   const front = document.createElement('div');
-  front.className = 'face front';
-  if (sp.right) front.innerHTML = `<img src="${sp.right}">`;
+  front.className='face front';
+  if(sp.right) front.innerHTML = `<img src="${sp.right}">`;
 
   const back = document.createElement('div');
-  back.className = 'face back';
-  if (sp.left) back.innerHTML = `<img src="${sp.left}">`;
+  back.className='face back';
+  if(sp.left) back.innerHTML = `<img src="${sp.left}">`;
 
-  sheet.appendChild(front);
-  sheet.appendChild(back);
-  rightStack.appendChild(sheet);
+  s.appendChild(front);
+  s.appendChild(back);
+  rightStack.appendChild(s);
 });
 
-leftImg.src = spreads[0].left;
+/* Initialize left page */
+leftA.src = spreads[0].left;
 
-/* animation easing */
-function easeOutQuad(t){ return 1 - (1 - t) * (1 - t); }
+/* easing */
+function easeOut(t){ return 1 - Math.pow(1-t,3); }
 
-/* PURE page flip: no cover, no scaling */
-function animateFlip(sheet, direction = 'next', duration = 900){
-  if (isAnimating) return Promise.reject('Animating...');
-  isAnimating = true;
-  setControls(false);
+/* Flip animation */
+function animateFlip(sheet, dir='next', dur=850){
+  if(animating) return Promise.reject();
+  animating=true;
 
   const start = performance.now();
-  const from = (direction === 'next') ? 0 : -180;
-  const to   = (direction === 'next') ? -180 : 0;
+  const from = dir==='next' ? 0 : -180;
+  const to   = dir==='next' ? -180 : 0;
 
-  return new Promise(resolve => {
+  return new Promise(res=>{
     function frame(now){
-      let t = Math.min(1, (now - start) / duration);
-      let eased = easeOutQuad(t);
-      let angle = from + (to - from) * eased;
+      let t = Math.min(1,(now-start)/dur);
+      let e = easeOut(t);
+      let angle = from + (to-from)*e;
 
       sheet.style.transform = `rotateY(${angle}deg)`;
 
-      if (t < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        sheet.style.transform = `rotateY(${to}deg)`;
-        isAnimating = false;
-        setControls(true);
-        resolve();
+      if(t<1) requestAnimationFrame(frame);
+      else{
+        sheet.style.transform=`rotateY(${to}deg)`;
+        animating=false;
+        res();
       }
     }
     requestAnimationFrame(frame);
   });
 }
 
+/* crossfade left page */
+function showLeft(src){
+  const top = leftFlag ? leftB : leftA;
+  const bottom = leftFlag ? leftA : leftB;
+  top.src = src;
+  top.style.opacity=1;
+  bottom.style.opacity=0;
+  leftFlag = !leftFlag;
+}
+
+/* Next page */
 async function goNext(){
-  if (isAnimating) return;
-  if (flipped >= spreads.length - 1) return;
-
+  if(animating || flipped>=spreads.length-1) return;
   const sheet = rightStack.querySelector(`.sheet[data-index="${flipped}"]`);
-  await animateFlip(sheet, 'next');
+  await animateFlip(sheet,'next');
   flipped++;
-  leftImg.src = spreads[flipped].left;
+  showLeft(spreads[flipped].left);
 }
 
+/* Prev page */
 async function goPrev(){
-  if (isAnimating) return;
-  if (flipped <= 0) return;
-
-  const idx = flipped - 1;
-  const sheet = rightStack.querySelector(`.sheet[data-index="${idx}"]`);
-  await animateFlip(sheet, 'prev');
+  if(animating || flipped<=0) return;
+  const sheet = rightStack.querySelector(`.sheet[data-index="${flipped-1}"]`);
+  await animateFlip(sheet,'prev');
   flipped--;
-  leftImg.src = spreads[flipped].left;
+  showLeft(spreads[flipped].left);
 }
 
-function setControls(enabled){
-  nextBtn.disabled = !enabled || (flipped >= spreads.length - 1);
-  prevBtn.disabled = !enabled || (flipped <= 0);
-}
-
-nextBtn.addEventListener('click', goNext);
-prevBtn.addEventListener('click', goPrev);
-
-book.addEventListener('click', (e) => {
-  if (isAnimating) return;
+/* Click to navigate */
+book.addEventListener('click', e=>{
+  if(animating) return;
   const rect = book.getBoundingClientRect();
-  const clickX = e.clientX - rect.left;
-  if (clickX > rect.width / 2) goNext();
+  const x = e.clientX - rect.left;
+  if(x > rect.width/2) goNext();
   else goPrev();
 });
 
-document.addEventListener('keydown', e => {
-  if (isAnimating) return;
-  if (e.key === 'ArrowRight') goNext();
-  if (e.key === 'ArrowLeft') goPrev();
+/* Keyboard */
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowRight') goNext();
+  if(e.key==='ArrowLeft') goPrev();
 });
 
-setControls(true);
+/* Mobile swipe */
+let startX = null;
+book.addEventListener('touchstart',e=>{
+  if(e.touches.length===1) startX=e.touches[0].clientX;
+},{passive:true});
+
+book.addEventListener('touchend',e=>{
+  if(startX===null) return;
+  const dx = e.changedTouches[0].clientX - startX;
+  startX=null;
+  if(Math.abs(dx)<30) return;
+  dx<0 ? goNext() : goPrev();
+});
 </script>
 
 </body>
