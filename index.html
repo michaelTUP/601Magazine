@@ -3,260 +3,514 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Book Flip — Fullscreen</title>
-
+<title>Book Flip — Realistic Covering Flip (Next/Prev Cover Logic) + Zoom</title>
 <style>
-  html, body {
-    margin:0; padding:0;
-    width:100%; height:100%;
-    overflow:hidden; /* no scrollbars */
-    background:#e9e9ea;
+  :root{
+    --book-width:900px;
+    --book-height:600px;
+  }
+  *{box-sizing:border-box; user-select:none;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    /* background gradient: blue -> maroon */
+    background: linear-gradient(135deg, #132440 0%, #6a0d4d 100%);
+    font-family:Arial, sans-serif;
+  }
+
+  /* Container that will be scaled for zooming */
+  .book-viewport{
+    width: calc(var(--book-width));
+    height: calc(var(--book-height));
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    /* ensure transform-origin center for scaling */
+    transform-origin: center center;
+    transition: transform 260ms ease;
+  }
+
+  /* BOOK LAYOUT -------------------------------------------------- */
+  .book{
+    width:var(--book-width);
+    height:var(--book-height);
+    display:flex;
+    position:relative;
+    box-shadow:0 18px 50px rgba(0,0,0,0.15);
+    background:#000;
+    overflow:visible;
+  }
+
+  .left-page{
+    width:50%;
+    height:100%;
+    background:#fff;
+    overflow:hidden;
+    position:relative;
+    z-index:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  /* Left page image: show full image (contain) and center it */
+  .left-page img{
+    max-width:100%;
+    max-height:100%;
+    width:auto;
+    height:auto;
+    object-fit:contain;
+    display:block;
+    -webkit-user-drag:none;
+    user-drag:none;
     user-select:none;
   }
 
-  :root{
-    --page-bg:#fff;
+  /* left cover (growing overlay from right to left) */
+  #leftCover{
+    position:absolute;
+    top:0;
+    right:0;
+    height:100%;
+    width:0%;
+    background-position:center center;
+    background-size:contain;
+    background-repeat:no-repeat;
+    pointer-events:none;
+    z-index:5;
+    box-shadow: inset -40px 0 60px rgba(0,0,0,0.35);
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
 
-  *{ box-sizing:border-box; -webkit-user-drag:none; }
+  .right-stack{
+    width:50%;
+    height:100%;
+    position:relative;
+    perspective:2000px;
+    overflow:visible;
+    background:#fff;
+  }
 
-  /* The BOOK fills the viewport height */
-  .book-area {
+  /* sheet that rotates */
+  .sheet{
     width:100%;
     height:100%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
-
-  .book{
-    height:95vh;                /* Fullscreen height */
-    aspect-ratio:3/2;           /* Keep natural book shape */
-    display:flex;
-    background:#ddd;
-    box-shadow:0 24px 60px rgba(0,0,0,0.18);
-    border-radius:4px;
-    overflow:hidden;
-    position:relative;
-  }
-
-  /* Left Page */
-  .left-page{
-    width:50%; height:100%;
-    background:var(--page-bg);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    overflow:hidden;
-    position:relative;
-    padding:10px;
-  }
-
-  /* Crossfade support */
-  .img-wrap{ width:100%; height:100%; position:relative; }
-  .img-wrap img{
     position:absolute;
-    width:100%; height:100%;
-    object-fit:contain;
-    transition:opacity .25s ease;
-  }
-
-  /* Right Stack */
-  .right-stack{
-    width:50%; height:100%;
-    perspective:2000px;
-    position:relative;
-    padding:10px;
-    background:var(--page-bg);
-  }
-
-  .sheet{
-    width:100%; height:100%;
-    position:absolute; top:0; left:0;
+    top:0;
+    left:0;
     transform-style:preserve-3d;
     transform-origin:left center;
-    pointer-events:none;
+    z-index:50;
+    will-change:transform, box-shadow;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:transparent;
   }
 
   .face{
+    width:100%;
+    height:100%;
     position:absolute;
-    width:100%; height:100%;
     backface-visibility:hidden;
+    overflow:hidden;
     background:#fff;
     display:flex;
     align-items:center;
     justify-content:center;
-    overflow:hidden;
-    border-radius:3px;
   }
 
   .face img{
     max-width:100%;
     max-height:100%;
+    width:auto;
+    height:auto;
     object-fit:contain;
+    display:block;
+    -webkit-user-drag:none;
+    user-drag:none;
+    user-select:none;
   }
 
   .back{ transform:rotateY(180deg); }
 
-  /* No buttons anymore */
+  /* Right-side vertical controls for zoom */
+  .zoom-controls{
+    position:fixed;
+    right:18px;
+    top:50%;
+    transform:translateY(-50%);
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    z-index:9999;
+    /* slight translucent backdrop for legibility */
+    padding:0px;
+    border-radius:12px;
+    backdrop-filter: blur(6px);
+  }
+
+  .zoom-controls button{
+    padding:1px 1px;
+    border-radius:120px;
+    border:1px solid rgba(255,255,255,0.25);
+    background:rgba(255,255,255,0.95);
+    cursor:pointer;
+    font-size:16px;
+    min-width:5px;
+    box-shadow: 0 6px 10px rgba(0,0,0,0.15);
+  }
+
+  .zoom-controls button:active{ transform:translateY(1px); }
+  .zoom-controls button:disabled{ opacity:0.5; cursor:default; }
+
+  /* small helper label (optional) */
+  .zoom-label{
+    text-align:center;
+    font-size:12px;
+    color:#fff;
+    margin-bottom:6px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  }
+
+  /* Responsive tweaks (shrink buttons a bit on narrow screens) */
+  @media (max-width:520px){
+    .zoom-controls button{ padding:10px 12px; font-size:14px; min-width:64px; }
+    .zoom-controls{ right:10px; gap:8px; }
+  }
+
 </style>
 </head>
-
 <body>
 
-<div class="book-area">
+<!-- viewport is the element that will be scaled -->
+<div class="book-viewport" id="bookViewport">
   <div class="book" id="book">
-
-    <div class="left-page">
-      <div class="img-wrap">
-        <img id="leftA" style="opacity:1">
-        <img id="leftB" style="opacity:0">
-      </div>
+    <div class="left-page" id="leftPage">
+      <img id="leftImg" src="" alt="">
+      <div id="leftCover"></div>
     </div>
 
     <div class="right-stack" id="rightStack"></div>
-
   </div>
 </div>
 
+<!-- Right-side zoom controls -->
+<div class="zoom-controls" id="zoomControls" aria-hidden="false">
+  <div class="zoom-label">Zoom</div>
+  <button id="zoomInBtn" aria-label="Zoom In">＋</button>
+  <button id="zoomOutBtn" aria-label="Zoom Out">－</button>
+  <button id="fitBtn" aria-label="Fit to Screen">Fit</button>
+</div>
+
 <script>
-/* pages */
+/* =======================
+   CONFIG: page images (reading order)
+   ======================= */
 const pages = [
-  "images/page1.jpg",
+      "images/page1.jpg",
   "images/page2.jpg",
   "images/page3.jpg",
   "images/page4.jpg",
   "images/page5.jpg",
-  "images/page6.jpg"
+  "images/page6.jpg",
+  "images/page7.jpg",
+  "images/page8.jpg",
+  "images/page9.jpg",
+  "images/page10.jpg",
+  "images/page11.jpg",
+   "images/page12.jpg",
+  "images/page13.jpg",
+  "images/page14.jpg",
+  "images/page15.jpg",
+  "images/page16.jpg",
+  "images/page17.jpg",
+  "images/page18.jpg",
+  "images/page19.jpg",
+  "images/page20.jpg",
+  "images/page21.jpg",
+  "images/page22.jpg",
+  "images/page23.jpg",
+  "images/page24.jpg",
+  "images/page25.jpg",
+  "images/page26.jpg",
+  "images/page27.jpg",
+  "images/page28.jpg",
+  "images/page29.jpg",
+  "images/page30.jpg",
+  "images/page31.jpg",
+  "images/page32.jpg",
+  "images/page33.jpg",
+  "images/page34.jpg",
+  "images/page35.jpg",
+  "images/page36.jpg",
+  "images/page37.jpg",
+  "images/page38.jpg",
+  "images/page39.jpg",
+  "images/page40.jpg",
+  "images/page41.jpg",
+  "images/page42.jpg",
+  "images/page43.jpg",
+  "images/page44.jpg",
+  "images/page45.jpg",
+  "images/page46.jpg",
+  "images/page47.jpg",
+  "images/page48.jpg",
+  "images/page49.jpg",
+  "images/page50.jpg",
+  "images/page51.jpg",
+  "images/page52.jpg",
+  "images/page53.jpg",
+  "images/page54.jpg",
 ];
+/* ======================= */
 
-/* Build spreads (left/right) */
+/* Build spreads (pairs) */
 const spreads = [];
-for (let i=0;i<pages.length;i+=2){
-  spreads.push({ left:pages[i]||'', right:pages[i+1]||'' });
+for (let i = 0; i < pages.length; i += 2) {
+  spreads.push({ left: pages[i] || '', right: pages[i+1] || '' });
 }
 
-/* elements */
-const leftA = document.getElementById('leftA');
-const leftB = document.getElementById('leftB');
-let leftFlag = true;
-
+const leftImg = document.getElementById('leftImg');
+const leftCover = document.getElementById('leftCover');
 const rightStack = document.getElementById('rightStack');
 const book = document.getElementById('book');
+const bookViewport = document.getElementById('bookViewport');
 
-let flipped = 0;
-let animating = false;
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const fitBtn = document.getElementById('fitBtn');
 
-/* Build right sheets */
-spreads.forEach((sp, idx)=>{
-  const s = document.createElement('div');
-  s.className='sheet';
-  s.dataset.index=idx;
-  s.style.zIndex = 200 - idx;
+let flipped = 0;         // how many sheets are flipped (0..spreads.length-1)
+let isAnimating = false; // guard
+
+/* Create sheets on right side */
+spreads.forEach((sp, idx) => {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.dataset.index = idx;
+  sheet.style.zIndex = 200 - idx;
 
   const front = document.createElement('div');
-  front.className='face front';
-  if(sp.right) front.innerHTML = `<img src="${sp.right}">`;
+  front.className = 'face front';
+  if (sp.right) front.innerHTML = `<img src="${sp.right}" alt="p${idx*2+2}">`;
 
   const back = document.createElement('div');
-  back.className='face back';
-  if(sp.left) back.innerHTML = `<img src="${sp.left}">`;
+  back.className = 'face back';
+  if (sp.left) back.innerHTML = `<img src="${sp.left}" alt="p${idx*2+1}">`;
 
-  s.appendChild(front);
-  s.appendChild(back);
-  rightStack.appendChild(s);
+  sheet.appendChild(front);
+  sheet.appendChild(back);
+  rightStack.appendChild(sheet);
 });
 
-/* Initialize left page */
-leftA.src = spreads[0].left;
+/* Initialize left image */
+leftImg.src = spreads[0] ? spreads[0].left : '';
+leftCover.style.width = '0%';
 
-/* easing */
-function easeOut(t){ return 1 - Math.pow(1-t,3); }
+/* Utility easing */
+function easeOutQuad(t){ return 1 - (1 - t) * (1 - t); }
 
-/* Flip animation */
-function animateFlip(sheet, dir='next', dur=850){
-  if(animating) return Promise.reject();
-  animating=true;
+/* Animate flip (same logic as before) */
+function animateFlip(sheet, direction = 'next', duration = 900){
+  if (isAnimating) return Promise.reject('animating');
+
+  let coverSrc = '';
+  if (direction === 'next') {
+    coverSrc = sheet.querySelector('.face.back img')?.src || spreads[flipped + 1]?.left || sheet.querySelector('.face.front img')?.src || '';
+  } else {
+    coverSrc = sheet.querySelector('.face.front img')?.src || spreads[flipped - 1]?.right || sheet.querySelector('.face.back img')?.src || '';
+  }
+
+  if (coverSrc) {
+    leftCover.style.backgroundImage = `url("${coverSrc}")`;
+    leftCover.style.backgroundPosition = 'center center';
+    leftCover.style.backgroundSize = 'contain';
+    leftCover.style.backgroundRepeat = 'no-repeat';
+  } else {
+    leftCover.style.backgroundImage = '';
+  }
+
+  isAnimating = true;
+  setControls(false);
 
   const start = performance.now();
-  const from = dir==='next' ? 0 : -180;
-  const to   = dir==='next' ? -180 : 0;
+  const from = (direction === 'next') ? 0 : -180;
+  const to = (direction === 'next') ? -180 : 0;
 
-  return new Promise(res=>{
+  return new Promise((resolve) => {
     function frame(now){
-      let t = Math.min(1,(now-start)/dur);
-      let e = easeOut(t);
-      let angle = from + (to-from)*e;
+      let t = Math.min(1, (now - start) / duration);
+      const eased = easeOutQuad(t);
+      const angle = from + (to - from) * eased;
 
       sheet.style.transform = `rotateY(${angle}deg)`;
 
-      if(t<1) requestAnimationFrame(frame);
-      else{
-        sheet.style.transform=`rotateY(${to}deg)`;
-        animating=false;
-        res();
+      const coverProgress = (direction === 'next') ? eased : (1 - eased);
+      const coverPct = Math.round(coverProgress * 100);
+      leftCover.style.width = `${coverPct}%`;
+
+      const shadowStrength = 0.25 + 0.45 * Math.sin(Math.PI * eased);
+      sheet.style.boxShadow = `-20px 8px 70px rgba(0,0,0,${shadowStrength})`;
+
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        sheet.style.transform = `rotateY(${to}deg)`;
+        leftCover.style.width = (direction === 'next') ? '100%' : '0%';
+        sheet.style.boxShadow = '';
+
+        isAnimating = false;
+        setControls(true);
+        resolve();
       }
     }
     requestAnimationFrame(frame);
   });
 }
 
-/* crossfade left page */
-function showLeft(src){
-  const top = leftFlag ? leftB : leftA;
-  const bottom = leftFlag ? leftA : leftB;
-  top.src = src;
-  top.style.opacity=1;
-  bottom.style.opacity=0;
-  leftFlag = !leftFlag;
-}
-
-/* Next page */
+/* Flip next */
 async function goNext(){
-  if(animating || flipped>=spreads.length-1) return;
+  if (isAnimating) return;
+  if (flipped >= spreads.length - 1) return;
+
   const sheet = rightStack.querySelector(`.sheet[data-index="${flipped}"]`);
-  await animateFlip(sheet,'next');
+  if (!sheet) return;
+
+  const upcomingLeft = spreads[flipped + 1] ? spreads[flipped + 1].left : '';
+  if (upcomingLeft) { const img = new Image(); img.src = upcomingLeft; }
+
+  await animateFlip(sheet, 'next', 900);
+
   flipped++;
-  showLeft(spreads[flipped].left);
+  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
+  setTimeout(() => leftCover.style.width = '0%', 40);
 }
 
-/* Prev page */
+/* Flip prev */
 async function goPrev(){
-  if(animating || flipped<=0) return;
-  const sheet = rightStack.querySelector(`.sheet[data-index="${flipped-1}"]`);
-  await animateFlip(sheet,'prev');
+  if (isAnimating) return;
+  if (flipped <= 0) return;
+
+  const idx = flipped - 1;
+  const sheet = rightStack.querySelector(`.sheet[data-index="${idx}"]`);
+  if (!sheet) return;
+
+  const upcomingLeft = spreads[idx] ? spreads[idx].left : '';
+  if (upcomingLeft) { const img = new Image(); img.src = upcomingLeft; }
+
+  await animateFlip(sheet, 'prev', 900);
+
   flipped--;
-  showLeft(spreads[flipped].left);
+  leftImg.src = spreads[flipped] ? spreads[flipped].left : '';
+  leftCover.style.width = '0%';
 }
 
-/* Click to navigate */
-book.addEventListener('click', e=>{
-  if(animating) return;
+/* Controls enable/disable (for flipping) */
+function setControls(enabled){
+  // flipping controls are keyboard/click/touch; keep them gated by isAnimating and bounds
+  // Buttons here are zoom controls; keep them always enabled
+  // but we can still prevent flipping when animating (handled elsewhere)
+}
+
+/* Event handlers (click on book to flip) */
+book.addEventListener('click', (e) => {
+  if (isAnimating) return;
   const rect = book.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  if(x > rect.width/2) goNext();
-  else goPrev();
+  const clickX = e.clientX - rect.left;
+  if (clickX > rect.width / 2) goNext(); else goPrev();
 });
 
-/* Keyboard */
-document.addEventListener('keydown', e=>{
-  if(e.key==='ArrowRight') goNext();
-  if(e.key==='ArrowLeft') goPrev();
+/* keyboard for flipping */
+document.addEventListener('keydown', (e) => {
+  if (isAnimating) return;
+  if (e.key === 'ArrowRight') goNext();
+  if (e.key === 'ArrowLeft') goPrev();
 });
 
-/* Mobile swipe */
+/* swipe */
 let startX = null;
-book.addEventListener('touchstart',e=>{
-  if(e.touches.length===1) startX=e.touches[0].clientX;
-},{passive:true});
-
-book.addEventListener('touchend',e=>{
-  if(startX===null) return;
+book.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) startX = e.touches[0].clientX; }, {passive:true});
+book.addEventListener('touchend', (e) => {
+  if (startX === null) return;
   const dx = e.changedTouches[0].clientX - startX;
-  startX=null;
-  if(Math.abs(dx)<30) return;
-  dx<0 ? goNext() : goPrev();
+  startX = null;
+  if (Math.abs(dx) < 30) return;
+  if (dx < 0) goNext(); else goPrev();
 });
+
+/* =========================
+   ZOOM / FIT implementation
+   - scale is applied to .book-viewport
+   - Fit computes a scale so book fits inside 90% of viewport
+   ========================= */
+let scale = 1;
+const minScale = 0.2;
+const maxScale = 3.0;
+
+/* Apply scale to viewport */
+function applyScale(){
+  bookViewport.style.transform = `scale(${scale})`;
+  // update disabled state of zoom buttons based on caps
+  zoomInBtn.disabled = scale >= maxScale - 0.001;
+  zoomOutBtn.disabled = scale <= minScale + 0.001;
+}
+
+/* Zoom multipliers */
+function zoomIn(){
+  scale = Math.min(maxScale, scale * 1.15);
+  applyScale();
+}
+function zoomOut(){
+  scale = Math.max(minScale, scale / 1.15);
+  applyScale();
+}
+
+/* Compute fit scale: fit to 90% of viewport width/height */
+function computeFitScale(){
+  const paddingFactor = 0.9; // leave 10% margin
+  const viewportW = window.innerWidth;
+  const viewportH = window.innerHeight;
+  // book natural sizes (from CSS root)
+  const bookW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--book-width')) || book.offsetWidth;
+  const bookH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--book-height')) || book.offsetHeight;
+  const scaleW = (viewportW * paddingFactor) / bookW;
+  const scaleH = (viewportH * paddingFactor) / bookH;
+  return Math.max(minScale, Math.min(maxScale, Math.min(scaleW, scaleH)));
+}
+
+/* Fit button action */
+function fitToScreen(){
+  scale = computeFitScale();
+  applyScale();
+}
+
+/* Button event listeners */
+zoomInBtn.addEventListener('click', () => { zoomIn(); });
+zoomOutBtn.addEventListener('click', () => { zoomOut(); });
+fitBtn.addEventListener('click', () => { fitToScreen(); });
+
+/* Recompute fit scale on resize so Fit always uses current viewport */
+window.addEventListener('resize', () => {
+  // keep current scale but update Fit available value (no visual change)
+  // optionally adjust if current scale would push beyond max/min (not necessary)
+  applyScale();
+});
+
+/* Initialize */
+applyScale();
+
+/* Init controls for flipping (no UI prev/next now) */
+setControls(true);
+
 </script>
 
 </body>
