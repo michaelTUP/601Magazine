@@ -1,0 +1,66 @@
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background-color: #f0f0f0;
+    font-family: sans-serif;
+}
+
+#book-container {
+    width: 600px; /* Width of the entire open book */
+    height: 400px;
+    position: relative;
+    /* Essential for 3D effect */
+    perspective: 1500px; 
+}
+
+.page-wrapper {
+    width: 50%; /* Each page is half the book width */
+    height: 100%;
+    position: absolute;
+    top: 0;
+    right: 0; /* Align pages to the right side (where the flip starts) */
+    
+    /* Transition for the flip animation */
+    transition: transform 1s; 
+    transform-origin: left; /* Crucial: Flips around the left edge */
+    
+    /* Default state: fully visible */
+    transform: rotateY(0deg); 
+    z-index: 10; /* Control the stacking order */
+}
+
+.page-wrapper.flipped {
+    /* Flipped state: Rotated 180 degrees */
+    transform: rotateY(-180deg);
+}
+
+.page {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    padding: 20px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    background-color: white;
+    
+    /* Essential for 3D page structure */
+    backface-visibility: hidden; 
+}
+
+.front {
+    transform: rotateY(0deg); /* Faces forward */
+    z-index: 2;
+}
+
+.back {
+    transform: rotateY(180deg); /* Faces backward */
+    z-index: 1;
+}
+
+/* Specific styling for page stack appearance */
+#page-1-wrapper { z-index: 10; }
+#page-3-wrapper { z-index: 9; }
+/* ... continue for more pages (z-index should decrease) ... */
