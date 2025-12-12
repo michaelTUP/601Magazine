@@ -33,7 +33,6 @@
       align-items:center;
     }
 
-    /* Removed header — controls moved overlaying book */
     .btn{
       appearance:none; border:1px solid #2a313a; background:#1b2230;
       color:var(--text); padding:.5rem .75rem; border-radius:8px; cursor:pointer;
@@ -48,8 +47,9 @@
       width:100%; max-width:var(--page-w); margin:1rem auto; padding:0; flex:1;
       display:flex; flex-direction:column; align-items:center; justify-content:center;
       gap:1rem;
-      position:relative;
+      position:relative; /* keep nav buttons positioned relative to main */
     }
+
     .book{
       width:var(--page-w); height:var(--page-h);
       background:#0c1424; border-radius:var(--radius);
@@ -66,36 +66,30 @@
       width:100%; height:100%; object-fit:contain;
       background:#0b1321;
     }
-    .flip-enter{
-      transform: translateX(100%) rotateY(-10deg);
-      opacity:.0;
-    }
+
+    /* flip animations */
+    .flip-enter{ transform: translateX(100%) rotateY(-10deg); opacity:.0; }
     .flip-enter-active{
       transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
-      transform: translateX(0) rotateY(0);
-      opacity:1;
+      transform: translateX(0) rotateY(0); opacity:1;
     }
-    .flip-exit{
-      transform: translateX(0) rotateY(0);
-      opacity:1;
-    }
+    .flip-exit{ transform: translateX(0) rotateY(0); opacity:1 }
     .flip-exit-active{
       transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
-      transform: translateX(-100%) rotateY(10deg);
-      opacity:0;
+      transform: translateX(-100%) rotateY(10deg); opacity:0;
     }
     .flip-enter-rtl{ transform: translateX(-100%) rotateY(10deg); opacity:.0 }
     .flip-enter-active-rtl{
       transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
-      transform: translateX(0) rotateY(0); opacity:1
+      transform: translateX(0) rotateY(0); opacity:1;
     }
     .flip-exit-rtl{ transform: translateX(0) rotateY(0); opacity:1 }
     .flip-exit-active-rtl{
       transition: transform var(--flip-dur) var(--ease), opacity var(--flip-dur) var(--ease);
-      transform: translateX(100%) rotateY(-10deg); opacity:0
+      transform: translateX(100%) rotateY(-10deg); opacity:0;
     }
 
-    /* Overlay Prev/Next arrow buttons (middle-left and middle-right) */
+    /* Navigation arrows placed OUTSIDE the book (middle-left and middle-right) */
     .nav-btn{
       position:absolute;
       top:50%;
@@ -116,9 +110,18 @@
     }
     .nav-btn:hover{ transform:translateY(-50%) scale(1.03) }
     .nav-btn:active{ transform:translateY(-50%) scale(.98) }
-    .nav-prev{ left:12px; }
-    .nav-next{ right:12px; }
 
+    /* place them outside the book using calc and the --page-w variable */
+    /* Prev on the left side, outside the image */
+    .nav-prev{
+      left: calc(50% - (var(--page-w) / 2) - 70px);
+    }
+    /* Next on the right side, outside the image */
+    .nav-next{
+      left: calc(50% + (var(--page-w) / 2) + 16px);
+    }
+
+    /* Controls bar under the book */
     .controls{
       display:flex; align-items:center; gap:.75rem; width:100%;
       background:var(--panel); border:1px solid #20262e;
@@ -140,16 +143,30 @@
     footer{
       color:var(--muted); text-align:center; padding:.5rem 1rem 1rem;
     }
+
     @media (prefers-reduced-motion: reduce){
       .flip-enter, .flip-enter-rtl { transform:none }
       .flip-enter-active, .flip-enter-active-rtl,
       .flip-exit-active, .flip-exit-active-rtl { transition:none }
     }
+
+    /* Hide the outside arrow buttons on small screens (phones) */
     @media (max-width:600px){
       :root{ --page-w: 94vw; }
       .counter{ font-size:.9rem }
-      .nav-btn{ width:44px; height:44px; font-size:18px }
-      .nav-prev{ left:8px } .nav-next{ right:8px }
+      .nav-btn{ display:none !important } /* hide arrows on phones */
+      /* tweak controls layout on phones */
+      .controls{ flex-direction:column; align-items:stretch; gap:.5rem }
+    }
+
+    /* If viewport gets narrow but not phone-size, ensure buttons don't go off-screen */
+    @media (max-width:1000px) and (min-width:601px) {
+      .nav-prev{
+        left: 8px; /* fallback to inside viewport */
+      }
+      .nav-next{
+        left: calc(100% - 8px - 54px); /* near right edge of main */
+      }
     }
   </style>
 </head>
@@ -157,7 +174,7 @@
   <main>
     <div class="book" id="book" aria-live="polite" aria-label="Book viewer"></div>
 
-    <!-- Overlay arrow-only navigation -->
+    <!-- Arrow-only navigation (placed outside the image) -->
     <button class="nav-btn nav-prev" id="btnPrev" aria-label="Previous page" title="Previous page">⟵</button>
     <button class="nav-btn nav-next" id="btnNext" aria-label="Next page" title="Next page">⟶</button>
 
@@ -168,10 +185,6 @@
       <button class="btn" id="btnLast" aria-label="Last page">Last</button>
     </div>
   </main>
-
-  <footer>
-    <small>Use arrow keys or swipe to flip pages. Hash links like #12 jump to page 12.</small>
-  </footer>
 
   <script>
     // 1) Configure your image pages here (in order):
@@ -360,7 +373,7 @@
     }
 
     function updateUI(){
-      counterEl.textContent = `Page ${current} / ${PAGES.length}`;
+      counterEl.textContent = ` ${current}`;
       sliderEl.value = String(current);
       btnPrev.disabled = current <= 1;
       btnFirst.disabled = current <= 1;
